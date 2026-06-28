@@ -9,9 +9,10 @@ This project builds a systematic equity research pipeline from the ground up, st
 
 The question behind the project is simple, but important: can measurable stock characteristics, such as profitability, momentum, volatility, and valuation, provide useful information about future returns?
 
-To test this, the pipeline analyses ten signals across a 50-stock S&P 500 universe. These signals are then used to construct a dollar-neutral and sector-neutral long/short portfolio through constrained quadratic optimisation. The strategy is evaluated using standard performance metrics, signal diagnostics, and Fama-French five-factor attribution.
+To test this, the pipeline analyses ten signals across a manually selected 52-stock large-cap U.S. equity universe. These signals are then used to construct a dollar-neutral and sector-neutral long/short portfolio through constrained quadratic optimisation. The strategy is evaluated using transaction-cost-adjusted backtesting, standard performance metrics, signal diagnostics, and Fama-French five-factor attribution.
 
-Every step is designed to be transparent and reproducible, with the methodology grounded in established quantitative finance research.
+Every step is designed to be transparent and reproducible, with the methodology grounded in established quantitative finance research. The project is best interpreted as a research prototype rather than a production-ready trading strategy, given limitations such as survivorship bias, non-point-in-time fundamental data, full-sample IC-based signal weighting, a short five-year sample period, and simplified transaction cost assumptions.
+
 
 ---
 
@@ -20,7 +21,7 @@ Every step is designed to be transparent and reproducible, with the methodology 
 The project follows the standard institutional research workflow used by systematic equity funds.
 
 ### 1. Data Preparation
-- **Universe:** 50 large-cap S&P 500 constituents across 11 GICS sectors
+- **Universe:** 52 large-cap U.S. equities across 11 sectors
 - **Price data:** Daily adjusted close prices and volume, sourced from Yahoo Finance via `yfinance`
 - **Fundamentals:** Current snapshot of book-to-price, return on equity, earnings yield, and related ratios from Yahoo Finance (noted limitation — see below)
 - **Benchmark:** Fama-French five-factor daily returns from the Ken French Data Library via `pandas-datareader`
@@ -41,7 +42,9 @@ Ten cross-sectional alpha signals were computed from historical price and fundam
 | Volume Trend | Technical | Lee & Swaminathan (2000) |
 | Book-to-Price | Value | Fama & French (1992) |
 | Return on Equity | Quality | Novy-Marx (2013) |
-| Earnings Yield | Value | — |
+| Current ROE snapshot | Quality | Used as a static fundamental proxy, not point-in-time |
+
+The notebook fetches several fundamental fields, including earnings yield, but the backtested composite uses book-to-price and ROE as the main static fundamental proxies. Earnings yield is fetched during data preparation but is not currently included as a separate alpha signal in the final raw_signals dictionary.
 
 A weighted composite score is built from signals with positive information coefficients only. Signals with negative IC are excluded from the portfolio. The IC-weighted composite achieved an ICIR of 5.070, compared to the best individual signal (ROE) at 3.048, demonstrating that signal diversification meaningfully improves predictive consistency.
 
@@ -49,7 +52,7 @@ A weighted composite score is built from signals with positive information coeff
 - **Optimiser:** Constrained quadratic programme solved via CVXPY (CLARABEL solver)
 - **Objective:** Maximise `α'w − λ·w'Σw` where `α` is the composite signal vector and `Σ` is the Ledoit-Wolf shrunk covariance matrix
 - **Constraints:** Dollar-neutral (`Σwᵢ = 0`), sector-neutral (within each sector), gross leverage ≤ 2×, maximum 8% per position
-- **Rebalancing:** Monthly (month-end), walk-forward with no look-ahead
+- **Rebalancing:** Monthly (month-end), monthly walk-forward portfolio construction, with an important caveat that signal weights are selected using full-sample IC diagnostics
 - **Transaction costs:** 10 basis points one-way, applied to net turnover
 
 ### 4. Backtesting
@@ -68,13 +71,13 @@ A weighted composite score is built from signals with positive information coeff
 
 ### 7. Signal Diagnostics
 - Information Coefficient (IC): Spearman rank correlation between each signal and 21-day forward returns
-- Information Coefficient Information Ratio (ICIR): IC / std(IC) × √252
+- Information Coefficient Information Ratio (ICIR): IC/std (IC) × √252
 - Hit rate: percentage of months where IC was positive
 - IC decay curves computed at horizons of 1, 5, 10, 21, 42, and 63 trading days
 
 ### 8. Bias Checks
 - Return autocorrelation tested at lags 1 through 21 against a 95% confidence interval (±0.056)
-- Positive autocorrelation at lag 1 would indicate look-ahead bias, none was found
+- Positive autocorrelation at lag 1 would indicate look-ahead bias, no obvious lag-1 autocorrelation red flag was found
 - Return distribution tested for normality via Q-Q plot (R² = 0.986) and kurtosis measurement
 
 ---
@@ -187,6 +190,8 @@ The strategy mostly behaved in the way I hoped it would. On a basic risk-adjuste
 
 This is where the Sortino and Calmar ratios are useful. They show that the strategy’s strength was not really about producing the highest raw return. Instead, its advantage came from managing downside risk more effectively. In other words, the strategy gave up some upside, but it also avoided a large part of the drawdown that came with holding the market passively.
 
+The strategy did not outperform the equal-weight universe on raw return or Sharpe ratio. This is an important benchmark result. The main strength of the strategy was not absolute return maximisation, but lower drawdown and lower volatility from market-neutral construction. Future work should compare the optimiser against simpler long/short factor portfolios to separate signal quality from portfolio construction effects.
+
 The most interesting part of the project was seeing which signals actually worked. Return on equity was the strongest predictor, with an ICIR of +3.048 and a hit rate of 57%. It was not just good in one isolated month. It was relatively consistent across the backtest, which made it stand out. Short-term reversal also contributed positively and seemed to add useful predictive information.
 
 These results make sense. Profitability and short-term mean reversion are both well-known ideas in quantitative finance, but it was still valuable to see them appear clearly in my own pipeline. It made the project feel less like an abstract coding exercise and more like a real research process where the data either supports the theory or challenges it.
@@ -205,13 +210,13 @@ Overall, I think the results support the idea that the pipeline is a strong rese
 
 ## Limitations
 
-No backtest is perfect, and this project has several limitations that are important to be honest about.
+The results should be interpreted as evidence that the pipeline works mechanically, not as proof of a persistent alpha. The two most important research limitations are the use of non-point-in-time fundamental data and the use of full-sample IC diagnostics to select signal weights. These choices are acceptable for a first research prototype, but they mean the reported performance should not be treated as a clean out-of-sample result.
 
 **Survivorship bias.**
 The stock universe is built from the current S&P 500 membership, rather than the historical membership at each point in time. This means companies that were removed from the index during the backtest period are missing from the analysis. In practice, some of those companies may have been removed after poor performance or financial distress. Because of this, the backtest may make the strategy look better than it would have looked in real time.
 
 **Fundamental data is not point-in-time.**
-The balance sheet and profitability data were sourced from yfinance reflects currently available information, not necessarily the exact data that would have been known at each historical rebalancing date. This is especially important for fundamental signals such as ROE, book-to-price, and earnings yield. In a more professional version of the project, this would need to be replaced with a proper point-in-time dataset from a source such as Compustat or Bloomberg.
+The balance sheet and profitability data were sourced from Yahoo Finance via `yfinance`, which provides current fundamental snapshots rather than the exact information known at each historical rebalancing date. This is especially important because the backtest includes static fundamental signals such as ROE and book-to-price. As a result, the fundamental component should be treated as illustrative rather than fully reliable. In a more professional version of the project, these signals would either be removed from the historical backtest or replaced with point-in-time data from sources such as Compustat, Bloomberg, FactSet, or WRDS.
 
 **The sample period is short.**
 Five years is useful for testing the pipeline, but it is not long enough to make strong conclusions about whether the alpha is persistent. The 2020–2024 period was also unusual. It included the COVID crash, a strong post-pandemic rally, a sharp interest rate hiking cycle, and the rise of AI-driven equity leadership. That is a lot to fit into one sample. It gives interesting evidence, but not a complete view of how the strategy would behave across different market regimes.
@@ -235,7 +240,7 @@ Overall, these limitations do not make the project invalid. Instead, they show w
 
 ## Future Improvements
 
-There are several ways this project could be improved to make the research more robust and closer to a production-quality strategy.
+The highest-priority improvement is to separate signal research from strategy evaluation. For example, signal ICs and weights could be estimated on a pre-2020 training period, then frozen and tested only on 2020–2024. This would make the performance results more credible because the strategy would be evaluated on data not used to choose the signals.
 
 **Extend the backtest period.**
 The current backtest is useful, but a longer time period would make the results much more reliable. Testing the pipeline over **15–20 years** would help assess whether the alpha is persistent across different market environments. It would also include major periods such as the 2008 financial crisis, the long low-volatility bull market of the 2010s, the 2020 COVID crash, and the 2022 inflation and rate-hiking shock. A strategy that performs reasonably across several regimes is much more convincing than one that only works in a short window.
